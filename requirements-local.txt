@@ -1,0 +1,9 @@
+pyyaml
+jsonschema
+pandas
+matplotlib
+jinja2
+huggingface_hub
+numpy
+tiktoken
+pytest

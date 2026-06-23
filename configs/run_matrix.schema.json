@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "run_matrix",
+  "type": "object",
+  "required": ["schema_version", "defaults", "models"],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "defaults": {
+      "type": "object",
+      "required": ["tensor_parallel_size", "max_model_len", "gpu_memory_utilization", "seed"],
+      "properties": {
+        "tensor_parallel_size": {"type": "integer", "minimum": 1},
+        "max_model_len": {"type": "integer", "minimum": 1},
+        "gpu_memory_utilization": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "seed": {"type": "integer"},
+        "trust_remote_code": {"type": "boolean"},
+        "gated": {"type": "boolean"}
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "hf_repo", "runs"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9.\\-]+$"},
+          "hf_repo": {"type": "string"},
+          "gated": {"type": "boolean"},
+          "trust_remote_code": {"type": "boolean"},
+          "max_model_len": {"type": "integer"},
+          "gpu_memory_utilization": {"type": "number"},
+          "vllm_extra_args": {"type": "object"},
+          "known_risk": {"type": "string"},
+          "runs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["quant_level", "quant_method", "dtype"],
+              "properties": {
+                "quant_level": {"type": "string"},
+                "quant_method": {"type": "string", "enum": ["none", "bitsandbytes"]},
+                "dtype": {"type": "string", "enum": ["float16", "bfloat16"]},
+                "bnb_args": {
+                  "type": ["object", "null"],
+                  "properties": {
+                    "load_in_8bit": {"type": "boolean"},
+                    "load_in_4bit": {"type": "boolean"},
+                    "bnb_4bit_quant_type": {"type": "string", "enum": ["nf4", "fp4"]},
+                    "bnb_4bit_compute_dtype": {"type": "string"},
+                    "bnb_4bit_use_double_quant": {"type": "boolean"}
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "if": {"properties": {"quant_method": {"const": "none"}}},
+                  "then": {"properties": {"bnb_args": {"const": null}}}
+                },
+                {
+                  "if": {"properties": {"quant_method": {"const": "bitsandbytes"}}},
+                  "then": {"required": ["bnb_args"]}
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

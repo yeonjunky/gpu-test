@@ -1,0 +1,69 @@
+==========================================
+LLM 양자화 벤치마크 계획서
+==========================================
+
+1. 목적
+--------
+오픈소스 LLM 4종을 bitsandbytes 양자화 수준별로 비교하여
+정확도 / 처리량(throughput) / 메모리 사용량을 측정하고,
+단일 H100(80GB) 환경 기준 비교 리포트를 작성한다.
+
+2. 대상 모델 및 양자화 단계
+--------------------------
+- Qwen2.5-32B        : FP16 -> INT8 -> INT4-NF4 -> INT4-NF4+double-quant
+- gemma-4-31B        : BF16 -> INT8 -> INT4-NF4 -> INT4-NF4+double-quant
+- Llama-3.3-70B      : INT8 -> INT4-NF4 -> INT4-NF4+double-quant (gated, FP16 생략)
+- Mixtral-8x7B       : INT8 -> INT4-NF4 -> INT4-NF4+double-quant (FP16 생략)
+
+* Llama/Mixtral은 FP16 풀프리시전이 80GB를 초과하여 베이스라인 생략
+* 총 14개 조합 (configs/run_matrix.yaml 참조)
+
+3. 평가 태스크
+--------------
+- Task A: 툴 사용 / JSON 정확도 (BFCL, 50샘플)
+- Task B: 코드 생성 (LiveCodeBench, medium/hard 50샘플, contest_date > 2025-01-31만 사용
+  -- gemma-4-31B 학습 cutoff(2025년 1월) 이후 문제만 골라 4개 모델 모두 오염 없음을 보장,
+  샌드박스 실행 채점: AtCoder=stdin 프로그램, LeetCode=함수형 모두 지원)
+- Task C: Needle in a Haystack (50샘플, 깊이 0~100%)
+
+4. 진행 단계 (RUNBOOK.md 기준)
+-------------------------------
+[Phase 0] 로컬 (GPU 불필요)
+  - venv 구성, requirements-local.txt 설치
+  - 3개 태스크 데이터 준비 스크립트 실행
+  - pytest로 스코어러 단위 테스트
+  - Llama-3.3-70B Hugging Face gated 접근 신청 (승인까지 수시간~수일,
+    이후 단계와 병행 진행)
+  - git init 후 원격 H100 박스로 rsync/clone
+
+[Phase 1] 원격 H100 박스 - 최초 설정
+  - .env 설정 (HF_TOKEN)
+  - setup/install.sh 실행, verify_env.py로 환경 확인
+  - 4개 모델 다운로드 (디스크 500GB~1TB 여유 필요)
+
+[Phase 2] 스파이크 테스트 (필수, 생략 불가)
+  - bnb 양자화 인자, Mixtral, gemma-4 관련 사전 검증 스크립트 실행
+  - 실패 시 known_risk 항목 확인 후 대응
+
+[Phase 3] 본 실행
+  - benchmark.orchestrator로 14개 조합 x 3개 태스크 순차 실행
+  - 예상 소요: 모델 다운로드 1.5~3시간, 본 연산 7~10시간
+    (재시도 포함 12~18시간), 야간 무인 실행 권장
+
+[Phase 4] 집계 및 리포트 생성
+  - aggregate_results.py -> results.csv
+  - generate_report.py -> report.md + figures
+
+[Phase 5] 결과 회수
+  - rsync로 results/, report/ 로컬로 다운로드
+
+5. 주요 리스크
+--------------
+- Mixtral-8x7B(MoE) + bitsandbytes 조합은 vLLM 지원이 상대적으로 미성숙
+- bnb_4bit_use_double_quant 옵션의 vLLM LLM() API 전파 여부 미검증
+- gemma-4-31B + bitsandbytes 조합은 공식 문서에 미기재 (W4A16/INT8만 문서화)
+-> 모두 spike_tests/ 통과 여부로 사전 검증 후 본 실행 진행
+
+6. 예상 일정
+------------
+총 14일

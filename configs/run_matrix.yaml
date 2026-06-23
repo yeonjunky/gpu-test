@@ -1,0 +1,141 @@
+schema_version: 1
+
+defaults:
+  tensor_parallel_size: 1
+  max_model_len: 8192
+  gpu_memory_utilization: 0.90
+  seed: 42
+  trust_remote_code: false
+  gated: false
+
+models:
+  - id: qwen2.5-32b
+    hf_repo: Qwen/Qwen2.5-32B-Instruct
+    runs:
+      - quant_level: fp16_baseline
+        quant_method: none
+        dtype: float16
+        bnb_args: null
+      - quant_level: int8_bnb
+        quant_method: bitsandbytes
+        dtype: float16
+        bnb_args:
+          load_in_8bit: true
+          load_in_4bit: false
+      - quant_level: int4_nf4_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: false
+      - quant_level: int4_nf4_doublequant_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: true
+
+  - id: gemma4-31b
+    hf_repo: google/gemma-4-31B
+    trust_remote_code: true
+    vllm_extra_args:
+      limit_mm_per_prompt: '{"image": 0, "audio": 0, "video": 0}'
+    runs:
+      - quant_level: bf16_baseline
+        quant_method: none
+        dtype: bfloat16
+        bnb_args: null
+      - quant_level: int8_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: true
+          load_in_4bit: false
+      - quant_level: int4_nf4_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: false
+      - quant_level: int4_nf4_doublequant_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: true
+
+  - id: llama3.3-70b
+    hf_repo: meta-llama/Llama-3.3-70B-Instruct
+    gated: true
+    max_model_len: 4096
+    gpu_memory_utilization: 0.92
+    runs:
+      - quant_level: int8_baseline
+        quant_method: bitsandbytes
+        dtype: float16
+        bnb_args:
+          load_in_8bit: true
+          load_in_4bit: false
+      - quant_level: int4_nf4_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: false
+      - quant_level: int4_nf4_doublequant_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: true
+
+  - id: mixtral-8x7b
+    hf_repo: mistralai/Mixtral-8x7B-Instruct-v0.1
+    known_risk: >
+      bnb support for MoE/Mixtral has historically been unstable in vLLM
+      (see vllm-project/vllm PR #20061, issue #20480, RFC #39583).
+      Run spike_tests/spike_test_mixtral_bnb.py before trusting these entries;
+      fall back to HF transformers + BitsAndBytesConfig for this model if it fails.
+    runs:
+      - quant_level: int8_baseline
+        quant_method: bitsandbytes
+        dtype: float16
+        bnb_args:
+          load_in_8bit: true
+          load_in_4bit: false
+      - quant_level: int4_nf4_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: false
+      - quant_level: int4_nf4_doublequant_bnb
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: true

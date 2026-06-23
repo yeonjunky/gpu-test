@@ -1,0 +1,45 @@
+# Per-task sampling/generation parameters and data file locations.
+# temperature=0 everywhere for deterministic, reproducible grading.
+
+task_a:
+  name: "Tool-use / JSON correctness (BFCL)"
+  data_file: data/prepared/task_a_bfcl_50.jsonl
+  n_samples: 50
+  max_tokens: 512
+  temperature: 0.0
+  system_prompt: >
+    You are a function-calling assistant. Given the user request and the
+    available tools (JSON schemas), respond with ONLY a JSON array of
+    function calls in the form [{"name": "...", "arguments": {...}}].
+    Do not include any prose, explanation, or markdown fences.
+
+task_b:
+  name: "Code generation (LiveCodeBench, medium/hard, post-2025-01-31 only)"
+  data_file: data/prepared/task_b_livecodebench_50.jsonl
+  n_samples: 50
+  max_tokens: 2048
+  temperature: 0.0
+  # Per-sample instructions (functional vs stdin format) are appended to this
+  # by benchmark/task_runners/run_task_b.py, since the two LiveCodeBench
+  # problem shapes need different completion instructions.
+  system_prompt: >
+    You are a competitive programmer. Solve the given problem in Python.
+    Respond with ONLY the final code, no explanation, no markdown fences,
+    no extra text.
+
+task_c:
+  name: "Needle in a Haystack"
+  data_file: data/prepared/task_c_niah_50.jsonl
+  n_samples: 50
+  max_tokens: 64
+  temperature: 0.0
+  system_prompt: >
+    Answer the question using only information found in the document above.
+    Respond with the shortest possible exact answer, no explanation.
+
+haystack:
+  source: "paul_graham_essays"
+  target_tokens_min: 20000
+  target_tokens_max: 30000
+  reference_tokenizer: "cl100k_base"   # fixed reference for consistent token counting across models
+  depths_pct: "linspace(0, 100, 50)"

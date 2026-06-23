@@ -1,0 +1,76 @@
+# LLM Quantization Benchmark Report
+
+Comparing task accuracy, throughput, and memory footprint of 4 open-source
+LLMs across multiple bitsandbytes quantization levels, served with vLLM on a
+single rented H100 (80GB).
+
+## Methodology
+
+- **Models**: Qwen2.5-32B-Instruct, Llama-3.3-70B-Instruct, Mixtral-8x7B-Instruct-v0.1, google/gemma-4-31B
+- **Quantization**: bitsandbytes, on-the-fly via vLLM (`quantization="bitsandbytes"`). Qwen2.5-32B and gemma-4-31B start at FP16/BF16; Llama-3.3-70B and Mixtral-8x7B start at INT8 because their FP16 footprint (~140GB and ~93GB respectively) exceeds a single 80GB H100.
+- **Tasks**: Task A (tool-use/JSON correctness, BFCL, 50 samples, key+type match scoring), Task B (code generation, LiveCodeBench, 50 medium/hard samples released after 2025-01-31, sandboxed stdin/functional execution), Task C (Needle in a Haystack, 50 samples spanning 0-100% depth, exact substring match).
+- **Sampling**: temperature=0 for all generations (deterministic).
+- **Metrics**: task accuracy, throughput (tokens/sec), TTFT + end-to-end latency, peak VRAM (via `nvidia-smi` polling, cross-checked against `torch.cuda.max_memory_allocated()`).
+{% if env_info %}
+- **Environment**: {{ env_info.gpu.gpu_name | default("?") }} ({{ env_info.gpu.gpu_total_vram_gb | default("?") }} GB), torch {{ env_info.packages.torch | default("?") }}, vLLM {{ env_info.packages.vllm | default("?") }}, bitsandbytes {{ env_info.packages.bitsandbytes | default("?") }}.
+{% endif %}
+
+**Important caveat**: {{ throughput_note }}
+
+### Data Contamination
+
+- **Task B (LiveCodeBench)**: filtered to `contest_date > 2025-01-31`, strictly after `google/gemma-4-31B`'s training cutoff (January 2025, the most recent of the 4 target models per its model card). None of the 4 models could have seen these problems during training. HumanEval was deliberately avoided for this reason -- it has been public since 2021 and is widely considered heavily memorized by modern open LLMs.
+- **Task A (BFCL)**: released ~Feb 2024. Contamination risk varies by model: Mixtral-8x7B (released Dec 2023) predates BFCL entirely and could not have seen it; Llama-3.3-70B's pretraining data cutoff (December 2023, per its model card -- the model itself was released Dec 2024, but the underlying pretraining corpus predates BFCL) also predates it, though later instruction-tuning data collection could theoretically have included it; Qwen2.5-32B and gemma-4-31B were trained after BFCL's release and may have been exposed to it directly or indirectly. Treat Task A cross-model comparisons with this asymmetry in mind.
+- **Task C (Needle in a Haystack)**: the Paul Graham essay source text is almost certainly known to all 4 models, but the injected secret string is freshly randomly generated per data-prep run and cannot appear in any training corpus -- the haystack source being memorized does not let a model "already know" the answer being tested, so this task is comparatively robust to contamination.
+
+## Known Gaps / Risks Encountered
+
+{% if missing_combos %}
+The following (model, quant_level) combinations are MISSING from this report (failed, skipped, or not yet run):
+
+{% for combo in missing_combos %}
+- `{{ combo }}`
+{% endfor %}
+
+Treat any comparison involving these combinations as incomplete.
+{% else %}
+All 14 expected (model, quant_level) combinations are present in this report.
+{% endif %}
+
+Known a-priori risks tracked during this project (see `configs/run_matrix.yaml` `known_risk` fields and `spike_tests/`):
+- Mixtral-8x7B (MoE) + bitsandbytes support in vLLM is newer/less mature than dense-model bnb support.
+- `bnb_4bit_use_double_quant` propagation through vLLM's `LLM()` API was verified via `spike_tests/spike_test_bnb_quant_args.py` before trusting the double-quant rows above.
+- gemma-4-31B + bitsandbytes was verified via `spike_tests/spike_test_gemma4_bnb.py` (officially documented vLLM quantization paths for this model are W4A16/int8-per-channel, not bnb).
+
+## Results Table (per model x quant_level x task)
+
+| Model | Quant Level | Task | Accuracy | n_samples | Throughput (tok/s) | Avg TTFT (ms) | Avg E2E (ms) | Peak VRAM (MB) |
+|---|---|---|---|---|---|---|---|---|
+{% for row in results_table -%}
+| {{ row.model_id }} | {{ row.quant_level }} | {{ row.task }} | {{ "%.2f"|format(row.accuracy_score) if row.accuracy_score is not none else "N/A" }} | {{ row.n_samples | default("N/A") }} | {{ "%.1f"|format(row.throughput_tok_per_sec) if row.throughput_tok_per_sec is not none else "N/A" }} | {{ "%.1f"|format(row.avg_ttft_ms) if row.avg_ttft_ms is not none else "N/A" }} | {{ "%.1f"|format(row.avg_e2e_latency_ms) if row.avg_e2e_latency_ms is not none else "N/A" }} | {{ "%.0f"|format(row.peak_vram_mb) if row.peak_vram_mb is not none else "N/A" }} |
+{% endfor %}
+
+## Per-Combo Summary (memory & load time, not task-specific)
+
+| Model | Quant Level | Load Time (s) | Peak VRAM (MB) | Avg Accuracy (3 tasks) |
+|---|---|---|---|---|
+{% for row in combo_table -%}
+| {{ row.model_id }} | {{ row.quant_level }} | {{ "%.1f"|format(row.load_time_sec) if row.load_time_sec is not none else "N/A" }} | {{ "%.0f"|format(row.peak_vram_mb) if row.peak_vram_mb is not none else "N/A" }} | {{ "%.2f"|format(row.avg_accuracy_score) if row.avg_accuracy_score is not none else "N/A" }} |
+{% endfor %}
+
+## Charts
+
+{% for filename, caption in figures -%}
+### {{ caption }}
+
+![{{ caption }}](figures/{{ filename }})
+
+{% endfor %}
+
+## Limitations
+
+- Task B grading uses only LiveCodeBench's public test cases (2-4 per problem), not its full private suite (which is encoded and used by the official leaderboard for stronger held-out grading) -- a weaker but model-agnostic signal applied identically across all 4 models.
+- Task A scoring is a project-specific simplified key/type matcher, not a reproduction of the official BFCL AST-equivalence grading.
+- Llama-3.3-70B and Mixtral-8x7B comparisons start from INT8, not FP16/BF16 -- they are not on the same starting baseline as Qwen2.5-32B and gemma-4-31B.
+- Token counts in the Needle-in-a-Haystack haystack use a fixed reference tokenizer (cl100k_base) rather than each model's native tokenizer, for cross-model consistency.
+- See the Data Contamination subsection above for per-task and per-model caveats on result validity.

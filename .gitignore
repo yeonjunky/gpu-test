@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.venv-local/
+venv/
+.env
+data/raw/
+results/
+report/figures/*.png
+*.egg-info/
+.pytest_cache/
