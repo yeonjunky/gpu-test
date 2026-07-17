@@ -47,19 +47,41 @@ python setup/download_models.py --model llama3.3-70b   # only once gated access 
 ```
 
 Confirm at least 500GB-1TB free disk (`verify_env.py` warns if not) -- 4
-models at native precision total ~360GB, and the bnb config-patch fallback
-(if triggered) can roughly double a given model's on-disk footprint.
+models at native precision total ~360GB, plus a locally-quantized cache per
+bnb `quant_level` (`/tmp/quantized_models/` by default, see Phase 2 note
+below), which can roughly double the on-disk footprint across the matrix.
 
 ## Phase 2 -- spike tests (CRITICAL, do not skip)
 
 ```bash
-python spike_tests/spike_test_bnb_quant_args.py
 python spike_tests/spike_test_mixtral_bnb.py
 python spike_tests/spike_test_gemma4_bnb.py
 ```
 
-If `spike_test_bnb_quant_args.py` FAILs: re-run the full matrix in Phase 3
-with `--quant-config-mode patched_config`.
+Note: `spike_test_bnb_quant_args.py` no longer needs to be run. Its original
+purpose was to check whether vLLM's `hf_overrides={"quantization_config":
+{...}}` correctly propagates `bnb_4bit_use_double_quant` -- that mechanism
+was confirmed broken (a weight-shape `AssertionError` in vLLM's loader,
+reproduced across every vLLM version tested, 0.9.2 through 0.25.1; see
+`spike_test_error_report.md` for the full investigation). `benchmark/
+engine.py::build_llm` no longer uses `hf_overrides` or a bare `quantization=`
+argument for bnb rungs at all -- it pre-quantizes each (model, quant_level)
+offline with `transformers` + `BitsAndBytesConfig`, saves the real quantized
+checkpoint to a local cache dir, and points vLLM at that cache dir directly
+(the officially documented "pre-quantized checkpoint" loading pattern,
+rather than in-flight quantization via a config override). The
+`--quant-config-mode` flag on `run_one_combo.py`/`orchestrator.py` and the
+`patched_config` fallback it used to select have been removed -- both were
+broken the same way.
+
+`spike_test_mixtral_bnb.py` and `spike_test_gemma4_bnb.py` are still
+relevant -- MoE+bnb instability and gemma4's untested-with-bnb status are
+real, architecture-specific risks independent of the fix above -- but as
+currently written they still exercise the old `hf_overrides` path, not the
+new `build_llm()` path, so their PASS/FAIL isn't representative of what
+Phase 3 will actually do. Until they're adapted to call
+`benchmark.engine.build_llm` directly, spot-check the real Mixtral/gemma4
+bnb legs against `build_llm` before trusting Phase 3 for those two models.
 
 If `spike_test_mixtral_bnb.py` or `spike_test_gemma4_bnb.py` FAILs: see the
 fallback notes printed by the script and in `configs/run_matrix.yaml`'s
