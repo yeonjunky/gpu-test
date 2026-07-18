@@ -11,11 +11,11 @@ single rented H100 (80GB).
 - **Tasks**: Task A (tool-use/JSON correctness, BFCL, 50 samples, key+type match scoring), Task B (code generation, LiveCodeBench, 50 medium/hard samples released after 2025-01-31, sandboxed stdin/functional execution), Task C (Needle in a Haystack, 50 samples spanning 0-100% depth, exact substring match).
 - **Sampling**: temperature=0 for all generations (deterministic).
 - **Metrics**: task accuracy, throughput (tokens/sec), TTFT + end-to-end latency, peak VRAM (via `nvidia-smi` polling, cross-checked against `torch.cuda.max_memory_allocated()`).
-{% if env_info %}
-- **Environment**: {{ env_info.gpu.gpu_name | default("?") }} ({{ env_info.gpu.gpu_total_vram_gb | default("?") }} GB), torch {{ env_info.gpu.torch_version | default("?") }}, vLLM {{ env_info.packages.vllm | default("?") }}, bitsandbytes {{ env_info.packages.bitsandbytes | default("?") }}.
-{% endif %}
 
-**Important caveat**: {{ throughput_note }}
+- **Environment**: NVIDIA H100 NVL (93.1 GB), torch 2.11.0+cu130, vLLM 0.25.1, bitsandbytes 0.49.2.
+
+
+**Important caveat**: Note: Llama-3.3-70B and Mixtral-8x7B start at INT8 (not FP16/BF16) due to VRAM limits, so the same x-axis position is NOT directly comparable across all models -- see methodology.
 
 ### Data Contamination
 
@@ -25,17 +25,19 @@ single rented H100 (80GB).
 
 ## Known Gaps / Risks Encountered
 
-{% if missing_combos %}
+
 The following (model, quant_level) combinations are MISSING from this report (failed, skipped, or not yet run):
 
-{% for combo in missing_combos %}
-- `{{ combo }}`
-{% endfor %}
+
+- `mixtral-8x7b/int8_baseline`
+
+- `mixtral-8x7b/int4_nf4_bnb`
+
+- `mixtral-8x7b/int4_nf4_doublequant_bnb`
+
 
 Treat any comparison involving these combinations as incomplete.
-{% else %}
-All 14 expected (model, quant_level) combinations are present in this report.
-{% endif %}
+
 
 Known a-priori risks tracked during this project (see `configs/run_matrix.yaml` `known_risk` fields, `spike_tests/`, and `spike_test_error_report.md`):
 - Mixtral-8x7B is excluded from every row above (not merely a missing combo to fill in later): this transformers version stores all 8 MoE experts per layer as fused 3D tensors (`gate_up_proj`/`down_proj`) rather than individual `nn.Linear` modules, so bitsandbytes' int8/int4 paths silently skip ~96% of Mixtral's parameters regardless of `device_map`, CPU offload, or streaming technique. This is a structural incompatibility, not a memory-management bug -- see `spike_test_error_report.md` for the full investigation.
@@ -46,26 +48,81 @@ Known a-priori risks tracked during this project (see `configs/run_matrix.yaml` 
 
 | Model | Quant Level | Task | Accuracy | n_samples | Throughput (tok/s) | Avg TTFT (ms) | Avg E2E (ms) | Peak VRAM (MB) |
 |---|---|---|---|---|---|---|---|---|
-{% for row in results_table -%}
-| {{ row.model_id }} | {{ row.quant_level }} | {{ row.task }} | {{ "%.2f"|format(row.accuracy_score) if row.accuracy_score is not none else "N/A" }} | {{ row.n_samples | default("N/A") }} | {{ "%.1f"|format(row.throughput_tok_per_sec) if row.throughput_tok_per_sec is not none else "N/A" }} | {{ "%.1f"|format(row.avg_ttft_ms) if row.avg_ttft_ms is not none else "N/A" }} | {{ "%.1f"|format(row.avg_e2e_latency_ms) if row.avg_e2e_latency_ms is not none else "N/A" }} | {{ "%.0f"|format(row.peak_vram_mb) if row.peak_vram_mb is not none else "N/A" }} |
-{% endfor %}
+| qwen2.5-32b | fp16_baseline | task_a | 0.90 | 50 | 298.4 | nan | nan | 89065 |
+| qwen2.5-32b | fp16_baseline | task_b | 0.26 | 50 | 584.9 | nan | nan | 89065 |
+| qwen2.5-32b | fp16_baseline | task_c | 1.00 | 50 | 5.1 | nan | nan | 89065 |
+| qwen2.5-32b | int8_bnb | task_a | 0.89 | 50 | 81.3 | nan | nan | 88237 |
+| qwen2.5-32b | int8_bnb | task_b | 0.18 | 50 | 109.7 | nan | nan | 88237 |
+| qwen2.5-32b | int8_bnb | task_c | 1.00 | 50 | 3.4 | nan | nan | 88237 |
+| qwen2.5-32b | int4_nf4_bnb | task_a | 0.89 | 50 | 197.1 | nan | nan | 90145 |
+| qwen2.5-32b | int4_nf4_bnb | task_b | 0.16 | 50 | 236.6 | nan | nan | 90145 |
+| qwen2.5-32b | int4_nf4_bnb | task_c | 1.00 | 50 | 5.0 | nan | nan | 90145 |
+| qwen2.5-32b | int4_nf4_doublequant_bnb | task_a | 0.89 | 50 | 196.0 | nan | nan | 90167 |
+| qwen2.5-32b | int4_nf4_doublequant_bnb | task_b | 0.16 | 50 | 187.6 | nan | nan | 90167 |
+| qwen2.5-32b | int4_nf4_doublequant_bnb | task_c | 1.00 | 50 | 5.0 | nan | nan | 90167 |
+| gemma4-31b | bf16_baseline | task_a | 0.84 | 50 | 173.7 | nan | nan | 90033 |
+| gemma4-31b | bf16_baseline | task_b | 0.64 | 50 | 520.4 | nan | nan | 90033 |
+| gemma4-31b | bf16_baseline | task_c | 1.00 | 50 | 5.3 | nan | nan | 90033 |
+| gemma4-31b | int8_bnb | task_a | 0.84 | 50 | 46.9 | nan | nan | 89959 |
+| gemma4-31b | int8_bnb | task_b | 0.62 | 50 | 128.8 | nan | nan | 89959 |
+| gemma4-31b | int8_bnb | task_c | 1.00 | 50 | 3.3 | nan | nan | 89959 |
+| gemma4-31b | int4_nf4_bnb | task_a | 0.84 | 50 | 191.3 | nan | nan | 91527 |
+| gemma4-31b | int4_nf4_bnb | task_b | 0.60 | 50 | 362.4 | nan | nan | 91527 |
+| gemma4-31b | int4_nf4_bnb | task_c | 1.00 | 50 | 4.9 | nan | nan | 91527 |
+| gemma4-31b | int4_nf4_doublequant_bnb | task_a | 0.84 | 50 | 191.2 | nan | nan | 91701 |
+| gemma4-31b | int4_nf4_doublequant_bnb | task_b | 0.56 | 50 | 352.8 | nan | nan | 91701 |
+| gemma4-31b | int4_nf4_doublequant_bnb | task_c | 1.00 | 50 | 4.9 | nan | nan | 91701 |
+| llama3.3-70b | int8_baseline | task_a | 0.83 | 50 | 65.2 | nan | nan | 91157 |
+| llama3.3-70b | int8_baseline | task_b | 0.20 | 50 | 31.3 | nan | nan | 91157 |
+| llama3.3-70b | int8_baseline | task_c | 0.26 | 50 | 5.1 | nan | nan | 91157 |
+| llama3.3-70b | int4_nf4_bnb | task_a | 0.90 | 50 | 94.5 | nan | nan | 93227 |
+| llama3.3-70b | int4_nf4_bnb | task_b | 0.34 | 50 | 117.0 | nan | nan | 93227 |
+| llama3.3-70b | int4_nf4_bnb | task_c | 0.36 | 50 | 3.2 | nan | nan | 93227 |
+| llama3.3-70b | int4_nf4_doublequant_bnb | task_a | 0.90 | 50 | 93.8 | nan | nan | 93277 |
+| llama3.3-70b | int4_nf4_doublequant_bnb | task_b | 0.40 | 50 | 124.9 | nan | nan | 93277 |
+| llama3.3-70b | int4_nf4_doublequant_bnb | task_c | 0.98 | 50 | 1.9 | nan | nan | 93277 |
+
 
 ## Per-Combo Summary (memory & load time, not task-specific)
 
 | Model | Quant Level | Load Time (s) | Peak VRAM (MB) | Avg Accuracy (3 tasks) |
 |---|---|---|---|---|
-{% for row in combo_table -%}
-| {{ row.model_id }} | {{ row.quant_level }} | {{ "%.1f"|format(row.load_time_sec) if row.load_time_sec is not none else "N/A" }} | {{ "%.0f"|format(row.peak_vram_mb) if row.peak_vram_mb is not none else "N/A" }} | {{ "%.2f"|format(row.avg_accuracy_score) if row.avg_accuracy_score is not none else "N/A" }} |
-{% endfor %}
+| qwen2.5-32b | fp16_baseline | 401.5 | 89065 | 0.72 |
+| qwen2.5-32b | int8_bnb | 87.6 | 88237 | 0.69 |
+| qwen2.5-32b | int4_nf4_bnb | 151.1 | 90145 | 0.68 |
+| qwen2.5-32b | int4_nf4_doublequant_bnb | 152.6 | 90167 | 0.68 |
+| gemma4-31b | bf16_baseline | 272.8 | 90033 | 0.83 |
+| gemma4-31b | int8_bnb | 135.5 | 89959 | 0.82 |
+| gemma4-31b | int4_nf4_bnb | 357.2 | 91527 | 0.81 |
+| gemma4-31b | int4_nf4_doublequant_bnb | 362.6 | 91701 | 0.80 |
+| llama3.3-70b | int8_baseline | 799.3 | 91157 | 0.43 |
+| llama3.3-70b | int4_nf4_bnb | 437.2 | 93227 | 0.53 |
+| llama3.3-70b | int4_nf4_doublequant_bnb | 408.0 | 93277 | 0.76 |
+
 
 ## Charts
 
-{% for filename, caption in figures -%}
-### {{ caption }}
+### Accuracy vs Quantization Level (per model, per task)
 
-![{{ caption }}](figures/{{ filename }})
+![Accuracy vs Quantization Level (per model, per task)](figures/accuracy_vs_quant_per_model.png)
 
-{% endfor %}
+### Throughput vs Quantization Level
+
+![Throughput vs Quantization Level](figures/throughput_vs_quant_per_model.png)
+
+### Peak VRAM vs Quantization Level
+
+![Peak VRAM vs Quantization Level](figures/memory_vs_quant_per_model.png)
+
+### Throughput vs Accuracy Trade-off
+
+![Throughput vs Accuracy Trade-off](figures/tradeoff_scatter.png)
+
+### Per-task Accuracy Breakdown
+
+![Per-task Accuracy Breakdown](figures/per_task_breakdown.png)
+
+
 
 ## Limitations
 
