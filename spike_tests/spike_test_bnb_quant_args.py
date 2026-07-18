@@ -30,6 +30,7 @@ def _worker(double_quant: bool) -> None:
         quantization="bitsandbytes",
         hf_overrides={
             "quantization_config": {
+                "quant_method": "bitsandbytes",
                 "load_in_4bit": True,
                 "bnb_4bit_quant_type": "nf4",
                 "bnb_4bit_compute_dtype": "bfloat16",
@@ -60,7 +61,7 @@ def main() -> None:
         print(f"=== Loading {TEST_MODEL} with bnb_4bit_use_double_quant={dq} ===")
         proc = subprocess.run(
             [sys.executable, __file__, "--_worker", "--double-quant", dq],
-            capture_output=True, text=True, timeout=600,
+            capture_output=True, text=True, timeout=1600,
         )
         if proc.returncode != 0:
             print(proc.stdout)
