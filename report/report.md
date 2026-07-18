@@ -1,13 +1,14 @@
 # LLM Quantization Benchmark Report
 
-Comparing task accuracy, throughput, and memory footprint of 4 open-source
+Comparing task accuracy, throughput, and memory footprint of 3 open-source
 LLMs across multiple bitsandbytes quantization levels, served with vLLM on a
-single rented H100 (80GB).
+single rented H100 (80GB). MoE architectures (e.g. Mixtral) are out of scope
+-- see the Known Gaps section below.
 
 ## Methodology
 
-- **Models**: Qwen2.5-32B-Instruct, Llama-3.3-70B-Instruct, Mixtral-8x7B-Instruct-v0.1, google/gemma-4-31B-it
-- **Quantization**: bitsandbytes, pre-quantized offline via `transformers` + `BitsAndBytesConfig` and saved to a local checkpoint that vLLM loads directly (vLLM's in-flight `hf_overrides={"quantization_config": ...}` path was found to be broken -- a weight-shape `AssertionError` reproduced across every vLLM version tested, 0.9.2-0.25.1 -- see `docs/spike_test_error_report.md`). Qwen2.5-32B and gemma-4-31B-it start at FP16/BF16; Llama-3.3-70B and Mixtral-8x7B start at INT8 because their FP16 footprint (~140GB and ~93GB respectively) exceeds a single 80GB H100.
+- **Models**: Qwen2.5-32B-Instruct, Llama-3.3-70B-Instruct, google/gemma-4-31B-it
+- **Quantization**: bitsandbytes, pre-quantized offline via `transformers` + `BitsAndBytesConfig` and saved to a local checkpoint that vLLM loads directly (vLLM's in-flight `hf_overrides={"quantization_config": ...}` path was found to be broken -- a weight-shape `AssertionError` reproduced across every vLLM version tested, 0.9.2-0.25.1 -- see `docs/spike_test_error_report.md`). Qwen2.5-32B and gemma-4-31B-it start at FP16/BF16; Llama-3.3-70B starts at INT8 because its FP16 footprint (~140GB) exceeds a single 80GB H100.
 - **Tasks**: Task A (tool-use/JSON correctness, BFCL, 50 samples, key+type match scoring), Task B (code generation, LiveCodeBench, 50 medium/hard samples released after 2025-01-31, sandboxed stdin/functional execution), Task C (Needle in a Haystack, 50 samples spanning 0-100% depth, exact substring match).
 - **Sampling**: temperature=0 for all generations (deterministic).
 - **Metrics**: task accuracy, throughput (tokens/sec), TTFT + end-to-end latency, peak VRAM (via `nvidia-smi` polling, cross-checked against `torch.cuda.max_memory_allocated()`).
@@ -15,33 +16,32 @@ single rented H100 (80GB).
 - **Environment**: NVIDIA H100 NVL (93.1 GB), torch 2.11.0+cu130, vLLM 0.25.1, bitsandbytes 0.49.2.
 
 
-**Important caveat**: Note: Llama-3.3-70B and Mixtral-8x7B start at INT8 (not FP16/BF16) due to VRAM limits, so the same x-axis position is NOT directly comparable across all models -- see methodology.
+**Important caveat**: Note: Llama-3.3-70B starts at INT8 (not FP16/BF16) due to VRAM limits, so the same x-axis position is NOT directly comparable across all models -- see methodology.
 
 ### Data Contamination
 
-- **Task B (LiveCodeBench)**: filtered to `contest_date > 2025-01-31`, strictly after `google/gemma-4-31B-it`'s training cutoff (January 2025, the most recent of the 4 target models per its model card). None of the 4 models could have seen these problems during training. HumanEval was deliberately avoided for this reason -- it has been public since 2021 and is widely considered heavily memorized by modern open LLMs.
-- **Task A (BFCL)**: released ~Feb 2024. Contamination risk varies by model: Mixtral-8x7B (released Dec 2023) predates BFCL entirely and could not have seen it; Llama-3.3-70B's pretraining data cutoff (December 2023, per its model card -- the model itself was released Dec 2024, but the underlying pretraining corpus predates BFCL) also predates it, though later instruction-tuning data collection could theoretically have included it; Qwen2.5-32B and gemma-4-31B-it were trained after BFCL's release and may have been exposed to it directly or indirectly. Treat Task A cross-model comparisons with this asymmetry in mind.
-- **Task C (Needle in a Haystack)**: the Paul Graham essay source text is almost certainly known to all 4 models, but the injected secret string is freshly randomly generated per data-prep run and cannot appear in any training corpus -- the haystack source being memorized does not let a model "already know" the answer being tested, so this task is comparatively robust to contamination.
+- **Task B (LiveCodeBench)**: filtered to `contest_date > 2025-01-31`, strictly after `google/gemma-4-31B-it`'s training cutoff (January 2025, the most recent of the 3 target models per its model card). None of the 3 models could have seen these problems during training. HumanEval was deliberately avoided for this reason -- it has been public since 2021 and is widely considered heavily memorized by modern open LLMs.
+- **Task A (BFCL)**: released ~Feb 2024. Contamination risk varies by model: Llama-3.3-70B's pretraining data cutoff (December 2023, per its model card -- the model itself was released Dec 2024, but the underlying pretraining corpus predates BFCL) predates BFCL's release, though later instruction-tuning data collection could theoretically have included it; Qwen2.5-32B and gemma-4-31B-it were trained after BFCL's release and may have been exposed to it directly or indirectly. Treat Task A cross-model comparisons with this asymmetry in mind.
+- **Task C (Needle in a Haystack)**: the Paul Graham essay source text is almost certainly known to all 3 models, but the injected secret string is freshly randomly generated per data-prep run and cannot appear in any training corpus -- the haystack source being memorized does not let a model "already know" the answer being tested, so this task is comparatively robust to contamination.
 
 ## Known Gaps / Risks Encountered
 
 
-The following (model, quant_level) combinations are MISSING from this report (failed, skipped, or not yet run):
+All 11 expected (model, quant_level) combinations are present in this report.
 
 
-- `mixtral-8x7b/int8_baseline`
-
-- `mixtral-8x7b/int4_nf4_bnb`
-
-- `mixtral-8x7b/int4_nf4_doublequant_bnb`
-
-
-Treat any comparison involving these combinations as incomplete.
-
+**MoE models (e.g. Mixtral-8x7B) are excluded from this benchmark's scope
+entirely**, not just missing a combo to backfill: this transformers version
+stores every MoE architecture's experts as fused 3D tensors
+(`gate_up_proj`/`down_proj`) rather than individual `nn.Linear` modules, so
+bitsandbytes' int8/int4 quantization paths cannot reach them at all regardless
+of `device_map`, CPU offload, or streaming technique -- confirmed to affect
+essentially every current MoE architecture in this transformers version, not
+just Mixtral (see `docs/Updates.md` and `docs/spike_test_error_report.md` for
+the full investigation).
 
 Known a-priori risks tracked during this project (see `configs/run_matrix.yaml` `known_risk` fields, `spike_tests/`, and `docs/spike_test_error_report.md`):
-- Mixtral-8x7B is excluded from every row above (not merely a missing combo to fill in later): this transformers version stores all 8 MoE experts per layer as fused 3D tensors (`gate_up_proj`/`down_proj`) rather than individual `nn.Linear` modules, so bitsandbytes' int8/int4 paths silently skip ~96% of Mixtral's parameters regardless of `device_map`, CPU offload, or streaming technique. This is a structural incompatibility, not a memory-management bug -- see `docs/spike_test_error_report.md` for the full investigation.
-- `bnb_4bit_use_double_quant` propagation and gemma-4-31B-it + bitsandbytes were both verified end-to-end via `spike_tests/spike_test_gemma4_bnb.py` and `spike_tests/spike_test_mixtral_bnb.py`, which call `benchmark.engine.build_llm` directly against the real `configs/run_matrix.yaml` rows -- the same code path this run used -- rather than a hand-typed stand-in config.
+- `bnb_4bit_use_double_quant` propagation and gemma-4-31B-it + bitsandbytes were both verified end-to-end via `spike_tests/spike_test_gemma4_bnb.py`, which calls `benchmark.engine.build_llm` directly against the real `configs/run_matrix.yaml` rows -- the same code path this run used -- rather than a hand-typed stand-in config.
 - **Llama-3.3-70B shows a non-monotonic accuracy pattern across quant levels**: Task C (needle-in-a-haystack) scores 0.26 at INT8, 0.36 at NF4, but 0.98 at NF4+double-quant -- the *least* precise variant performs best, the opposite of the usual quantization/quality tradeoff. Inspecting raw generations shows the INT8/NF4 runs frequently fall into repetitive, rambling text instead of directly stating the answer (avg ~50-60 output tokens, often hitting the task's 64-token cap before answering), while NF4+double-quant answers tersely and directly (avg ~10 tokens, matching Qwen's style). All three checkpoints were freshly quantized for this run (not a stale-cache artifact). This looks like quantization noise nondeterministically nudging greedy (temperature=0) decoding into or out of a repetition-loop failure mode specific to this model, rather than a straightforward precision-vs-quality effect -- treat Llama-3.3-70B's Task B/C numbers as a real, reportable finding rather than a clean quantization comparison.
 
 ## Results Table (per model x quant_level x task)
@@ -126,8 +126,8 @@ Known a-priori risks tracked during this project (see `configs/run_matrix.yaml` 
 
 ## Limitations
 
-- Task B grading uses only LiveCodeBench's public test cases (2-4 per problem), not its full private suite (which is encoded and used by the official leaderboard for stronger held-out grading) -- a weaker but model-agnostic signal applied identically across all 4 models.
+- Task B grading uses only LiveCodeBench's public test cases (2-4 per problem), not its full private suite (which is encoded and used by the official leaderboard for stronger held-out grading) -- a weaker but model-agnostic signal applied identically across all 3 models.
 - Task A scoring is a project-specific simplified key/type matcher, not a reproduction of the official BFCL AST-equivalence grading.
-- Llama-3.3-70B and Mixtral-8x7B comparisons start from INT8, not FP16/BF16 -- they are not on the same starting baseline as Qwen2.5-32B and gemma-4-31B.
+- Llama-3.3-70B's comparisons start from INT8, not FP16/BF16 -- it is not on the same starting baseline as Qwen2.5-32B and gemma-4-31B.
 - Token counts in the Needle-in-a-Haystack haystack use a fixed reference tokenizer (cl100k_base) rather than each model's native tokenizer, for cross-model consistency.
 - See the Data Contamination subsection above for per-task and per-model caveats on result validity.

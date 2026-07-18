@@ -2,8 +2,8 @@
 all 3 tasks, then exits. Always launched as its OWN subprocess by
 benchmark/orchestrator.py (never looped in-process) so process exit
 guarantees full CUDA context teardown between combos -- important given the
-new gemma4 architecture and uncertain Mixtral+bnb MoE support (see plan
-risks). GPU-only; not runnable on the local authoring machine.
+new gemma4 architecture and the large per-model memory footprints involved.
+GPU-only; not runnable on the local authoring machine.
 
 Usage:
     python -m benchmark.run_one_combo --model-id qwen2.5-32b --quant-level int8_bnb

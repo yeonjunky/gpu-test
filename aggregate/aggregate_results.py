@@ -1,7 +1,7 @@
 """Walks results/<model_id>/<quant_level>/ and flattens everything into
-results.csv (one row per model x quant_level x task, 14x3=42 rows when the
+results.csv (one row per model x quant_level x task, 11x3=33 rows when the
 full matrix succeeds) and results_by_combo.csv (one row per model x
-quant_level, 14 rows, for combo-level metrics like peak VRAM and load time
+quant_level, 11 rows, for combo-level metrics like peak VRAM and load time
 that don't vary by task).
 
 Also cross-checks against configs/run_matrix.yaml and writes

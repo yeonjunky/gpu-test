@@ -340,3 +340,48 @@ fused-tensor MoE modules like `MixtralExperts`. `configs/run_matrix.yaml`'s `kno
 for `mixtral-8x7b` and `RUNBOOK.md` have been updated accordingly. `int4_nf4_bnb`/
 `int4_nf4_doublequant_bnb` were not separately tested -- the same structural gap applies
 regardless of target bit-width, so they're expected to hit the same outcome.
+
+## Update 2026-07-18: surveyed every MoE architecture in this transformers version -- same wall everywhere
+
+Before accepting Mixtral's exclusion as final, checked whether swapping to a *different*
+MoE model (Qwen2-MoE, Qwen3-MoE, OLMoE, GLM4-MoE, DeepSeek-V2/V3, GraniteMoE, PhiMoE, DBRX,
+JetMoE, Cohere2-MoE, Llama4, GPT-OSS, ...) would sidestep the fused-tensor problem. Inspected
+the actually-installed transformers 5.14.1 source directly (`.venv/lib/python3.12/
+site-packages/transformers/models/*/modeling_*.py`) rather than relying on memory:
+
+```
+$ grep -l "stored as 3D tensors" */modeling_*.py
+mixtral, qwen2_moe, qwen3_moe, olmoe, glm4_moe, deepseek_v2, deepseek_v3,
+granitemoe, phimoe, cohere2_moe, llama4, gpt_oss, ...
+```
+
+Every current decoder-only MoE architecture in this transformers version stores its experts
+as fused 3D `nn.Parameter` tensors (`gate_up_proj`/`down_proj`), the same pattern documented
+above for Mixtral -- this is a library-wide refactor in transformers v5, not something
+specific to Mixtral's checkpoint or config. The only exceptions found (`nllb_moe`,
+`switch_transformers`) still use genuine per-expert `nn.Linear` modules via `nn.ModuleDict`,
+but both are 2020/2021-era encoder-decoder translation/T5-style models, unusable for this
+benchmark's tool-use/code-gen/needle-in-haystack tasks.
+
+Confirmed externally via web search:
+- [bitsandbytes#1849](https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1849):
+  "Failed to quant MoE models with fused expert weights in transformers v5" -- reports the
+  identical issue for Gemma-4's MoE variant and Qwen3-30B-A3B.
+- [vLLM#20480](https://github.com/vllm-project/vllm/issues/20480): vLLM's own tracking issue
+  states plainly that "BNB inference has not yet been extended to MoE models."
+- [vLLM#39583](https://github.com/vllm-project/vllm/issues/39583): an RFC to deprecate
+  bitsandbytes/GGUF support in vLLM entirely, citing low usage vs. maintenance burden --
+  suggesting this gap is unlikely to close soon.
+
+**Decision (user-approved, final): MoE architectures are out of scope for this benchmark
+entirely**, not deferred pending a workaround. `configs/run_matrix.yaml`'s `mixtral-8x7b`
+entry was deleted (rather than kept as a documented-but-excluded row), and
+`spike_tests/spike_test_mixtral_bnb.py` was deleted since there's no longer a config entry
+for it to exercise. See `docs/Updates.md` for the corresponding plan-deviation summary.
+
+If MoE support is revisited later, the practical path is not "pick a different MoE model" --
+every one tried hits the same wall -- but either (a) a model that ships already quantized in
+a non-bitsandbytes format, e.g. `openai/gpt-oss-20b`/`gpt-oss-120b`'s native MXFP4
+checkpoints (~14GB / ~60.8GB on disk respectively, both fit this H100), which would need a
+new `quant_method` branch in `benchmark/engine.py` rather than `bnb_args`, or (b) a future
+transformers/bitsandbytes release with explicit fused-expert-tensor quantization support.

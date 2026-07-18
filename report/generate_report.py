@@ -22,9 +22,10 @@ TASK_LABELS = {
 }
 
 # Quant-level display order per model family (baseline -> most aggressive).
-# Models starting at INT8 (Llama, Mixtral) simply don't have the *_baseline
-# fp16/bf16 entry -- the orchestrator/x-axis must not imply false
-# comparability across models at "the same" position (see report note below).
+# Llama simply doesn't have a *_baseline fp16/bf16 entry (its full-precision
+# footprint doesn't fit a single H100) -- the orchestrator/x-axis must not
+# imply false comparability across models at "the same" position (see report
+# note below).
 QUANT_ORDER = [
     "fp16_baseline",
     "bf16_baseline",
@@ -76,7 +77,7 @@ def plot_metric_vs_quant(combo_df: pd.DataFrame, metric: str, ylabel: str, title
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     note = (
-        "Note: Llama-3.3-70B and Mixtral-8x7B start at INT8 (not FP16/BF16) due to "
+        "Note: Llama-3.3-70B starts at INT8 (not FP16/BF16) due to "
         "VRAM limits, so the same x-axis position is NOT directly comparable across "
         "all models -- see methodology."
     )

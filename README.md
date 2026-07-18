@@ -1,23 +1,25 @@
 # LLM Quantization Benchmark
 
-Compares task accuracy, throughput, and memory footprint of 4 open-source
+Compares task accuracy, throughput, and memory footprint of 3 open-source
 LLMs across multiple bitsandbytes quantization levels, served with vLLM on a
-single rented H100 (80GB), and produces a written comparison report.
+single rented H100 (80GB), and produces a written comparison report. MoE
+architectures (e.g. Mixtral) are out of scope -- see "Known risks" below.
 
 ## Models & quantization ladder
 
 | Model | HF repo | Levels (baseline -> most aggressive) |
 |---|---|---|
 | Qwen2.5-32B | `Qwen/Qwen2.5-32B-Instruct` | FP16 -> INT8 -> INT4-NF4 -> INT4-NF4+double-quant |
-| gemma-4-31B | `google/gemma-4-31B` | BF16 -> INT8 -> INT4-NF4 -> INT4-NF4+double-quant |
+| gemma-4-31B | `google/gemma-4-31B-it` | BF16 -> INT8 -> INT4-NF4 -> INT4-NF4+double-quant |
 | Llama-3.3-70B | `meta-llama/Llama-3.3-70B-Instruct` (gated) | INT8 -> INT4-NF4 -> INT4-NF4+double-quant |
-| Mixtral-8x7B | `mistralai/Mixtral-8x7B-Instruct-v0.1` | INT8 -> INT4-NF4 -> INT4-NF4+double-quant |
 
-Llama and Mixtral skip the FP16 baseline because their full-precision
-footprint (~140GB and ~93GB respectively) exceeds a single 80GB H100. All
-quantization is bitsandbytes, applied on-the-fly by vLLM (no separate
-pre-quantized checkpoints). See `configs/run_matrix.yaml` for the exact
-14-combo declarative matrix.
+Llama skips the FP16 baseline because its full-precision footprint (~140GB)
+exceeds a single 80GB H100. All quantization is bitsandbytes: each (model,
+quant_level) combo is pre-quantized offline via `transformers` +
+`BitsAndBytesConfig` and saved to a local checkpoint, which vLLM then loads
+directly (vLLM's in-flight `hf_overrides=` quantization path was found to be
+broken -- see `docs/spike_test_error_report.md`). See `configs/run_matrix.yaml`
+for the exact 11-combo declarative matrix.
 
 ## Tasks
 
@@ -28,17 +30,17 @@ pre-quantized checkpoints). See `configs/run_matrix.yaml` for the exact
 ### Data contamination note (Task B)
 
 HumanEval was deliberately NOT used for Task B: it has been public since 2021
-and is almost certainly memorized by all 4 target models (their solutions
+and is almost certainly memorized by all 3 target models (their solutions
 have been copied into countless repos/posts since release), which would
 conflate "can solve" with "can recall." LiveCodeBench tags every problem with
 a `contest_date`, so Task B is filtered to problems released after
-**2025-01-31** -- strictly after `google/gemma-4-31B`'s training cutoff
-(January 2025, the most recent of the 4 target models), guaranteeing none of
-the 4 models could have seen these problems during training. See
+**2025-01-31** -- strictly after `google/gemma-4-31B-it`'s training cutoff
+(January 2025, the most recent of the 3 target models), guaranteeing none of
+the 3 models could have seen these problems during training. See
 `data/prep_scripts/prepare_task_b_livecodebench.py` for details.
 
 Task A (BFCL, released ~Feb 2024) and Task C's haystack source (Paul Graham
-essays, long pre-dating all 4 models) still carry some contamination risk --
+essays, long pre-dating all 3 models) still carry some contamination risk --
 see the report's Limitations section for the per-model reasoning.
 
 ## Repo layout
@@ -47,7 +49,7 @@ This machine (no GPU) authors and validates everything that doesn't need a
 GPU; the remote H100 box only runs `benchmark/` and `spike_tests/`.
 
 ```
-configs/            run_matrix.yaml (the 14 combos), tasks.yaml
+configs/            run_matrix.yaml (the 11 combos), tasks.yaml
 data/prep_scripts/  build data/prepared/*.jsonl -- run locally, no GPU
 scorers/             Task A/B/C scorers + sandboxed code-exec grader -- run locally, no GPU
 tests/               pytest unit tests for the scorers -- run locally, no GPU
@@ -79,10 +81,13 @@ pytest tests/
 
 ## Known risks
 
-See `configs/run_matrix.yaml`'s `known_risk` field (Mixtral MoE+bnb) and
-`spike_tests/` (must all pass before trusting the full 14-combo run):
-Mixtral-8x7B (MoE) + bitsandbytes support in vLLM is newer/less mature than
-dense-model bnb support; `bnb_4bit_use_double_quant` propagation through
-vLLM's `LLM()` API is unverified until `spike_test_bnb_quant_args.py` passes;
-gemma-4-31B + bitsandbytes is unverified (official vLLM docs only cover
-W4A16/int8-per-channel for this model).
+- **MoE models are out of scope.** Mixtral-8x7B was originally part of this
+  matrix; it was dropped after confirming (see `docs/spike_test_error_report.md`
+  and `docs/Updates.md`) that this transformers version stores every MoE
+  architecture's experts as fused 3D tensors rather than individual
+  `nn.Linear` modules, so bitsandbytes cannot quantize them at all -- not a
+  Mixtral-specific bug, and not fixable by picking a different MoE model.
+- gemma-4-31B-it + bitsandbytes was unverified going in (official vLLM docs
+  only cover W4A16/int8-per-channel for this model) -- confirmed working via
+  `spike_tests/spike_test_gemma4_bnb.py`, which must pass before trusting the
+  full 11-combo run.

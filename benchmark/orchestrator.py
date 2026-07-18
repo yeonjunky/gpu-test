@@ -8,7 +8,7 @@ model's combos after a config fix.
 Usage:
     python -m benchmark.orchestrator --config configs/run_matrix.yaml
     python -m benchmark.orchestrator --resume
-    python -m benchmark.orchestrator --only mixtral-8x7b
+    python -m benchmark.orchestrator --only llama3.3-70b
 """
 import argparse
 import subprocess
