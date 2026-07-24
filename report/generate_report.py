@@ -47,10 +47,18 @@ def plot_accuracy_vs_quant(df: pd.DataFrame, out_path: Path) -> None:
     fig, axes = plt.subplots(1, len(models), figsize=(5 * len(models), 4), squeeze=False)
     for ax, model_id in zip(axes[0], models):
         sub = df[df["model_id"] == model_id]
-        for task in sub["task"].unique():
+        # Shared order across every task line in this subplot, so quant levels
+        # land at the same x position regardless of which task happens to be
+        # plotted first (matplotlib otherwise assigns categorical x positions
+        # in first-seen order, which can scramble the left-to-right sequence).
+        order = order_quant_levels(list(sub["quant_level"].unique()))
+        for task in sorted(sub["task"].unique()):
             task_sub = sub[sub["task"] == task]
-            order = order_quant_levels(list(task_sub["quant_level"].unique()))
             task_sub = task_sub.set_index("quant_level").reindex(order).reset_index()
+            # Drop levels this task/model doesn't have so the line connects
+            # straight to the next real point instead of breaking at a gap
+            # reserved for another model's quant level (see plot_metric_vs_quant).
+            task_sub = task_sub.dropna(subset=["accuracy_score"])
             ax.plot(task_sub["quant_level"], task_sub["accuracy_score"], marker="o", label=TASK_LABELS.get(task, task))
         ax.set_title(model_id)
         ax.set_ylim(0, 1)
@@ -64,11 +72,28 @@ def plot_accuracy_vs_quant(df: pd.DataFrame, out_path: Path) -> None:
 
 def plot_metric_vs_quant(combo_df: pd.DataFrame, metric: str, ylabel: str, title: str, out_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(7, 5))
+    # Global order across ALL models sharing this axes, not just each model's
+    # own subset -- otherwise matplotlib places each new quant level at the
+    # x position it first appears in, which depends on model plot order
+    # (e.g. Llama's int8_baseline landing to the right of int4_nf4 levels).
+    #
+    # We plot at fixed numeric positions (index into `order`) rather than
+    # letting matplotlib treat quant_level as an auto-assigned string
+    # category: with a string axis, dropping a model's missing levels (to
+    # avoid a broken/isolated point) makes matplotlib re-derive category
+    # order from first-appearance-per-line again, undoing the fix above.
+    # Numeric positions keep the global order fixed regardless of which
+    # levels any single line happens to skip.
+    order = order_quant_levels(list(combo_df["quant_level"].unique()))
+    x_pos = {level: i for i, level in enumerate(order)}
     for model_id in sorted(combo_df["model_id"].unique()):
         sub = combo_df[combo_df["model_id"] == model_id]
-        order = order_quant_levels(list(sub["quant_level"].unique()))
-        sub = sub.set_index("quant_level").reindex(order).reset_index()
-        ax.plot(sub["quant_level"], sub[metric], marker="o", label=model_id)
+        sub = sub[sub["quant_level"].isin(x_pos)].sort_values(
+            by="quant_level", key=lambda s: s.map(x_pos)
+        )
+        ax.plot(sub["quant_level"].map(x_pos), sub[metric], marker="o", label=model_id)
+    ax.set_xticks(range(len(order)))
+    ax.set_xticklabels(order)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.tick_params(axis="x", rotation=45)
@@ -115,11 +140,19 @@ def plot_per_task_breakdown(df: pd.DataFrame, out_path: Path) -> None:
     fig, axes = plt.subplots(1, len(tasks), figsize=(5 * len(tasks), 4), squeeze=False)
     for ax, task in zip(axes[0], tasks):
         sub = df[df["task"] == task]
+        # Shared order across every model line in this subplot, at fixed
+        # numeric positions (see plot_metric_vs_quant for why a string-based
+        # categorical axis breaks once any line skips a level).
+        order = order_quant_levels(list(sub["quant_level"].unique()))
+        x_pos = {level: i for i, level in enumerate(order)}
         for model_id in sorted(sub["model_id"].unique()):
             model_sub = sub[sub["model_id"] == model_id]
-            order = order_quant_levels(list(model_sub["quant_level"].unique()))
-            model_sub = model_sub.set_index("quant_level").reindex(order).reset_index()
-            ax.plot(model_sub["quant_level"], model_sub["accuracy_score"], marker="o", label=model_id)
+            model_sub = model_sub[model_sub["quant_level"].isin(x_pos)].sort_values(
+                by="quant_level", key=lambda s: s.map(x_pos)
+            )
+            ax.plot(model_sub["quant_level"].map(x_pos), model_sub["accuracy_score"], marker="o", label=model_id)
+        ax.set_xticks(range(len(order)))
+        ax.set_xticklabels(order)
         ax.set_title(TASK_LABELS.get(task, task))
         ax.set_ylim(0, 1)
         ax.tick_params(axis="x", rotation=45)
