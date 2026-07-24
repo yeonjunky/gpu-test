@@ -98,10 +98,53 @@ nf4+double-quant는 (qwen처럼) 짧고 직접적으로 답함. 세 체크포인
 고쳐야 할 버그라기보다는 그 자체로 보고할 가치가 있는 실제 결과로 봐야 함.
 `report/report.md`의 known-risks 섹션에 문서화되어 있음.
 
+## 8. Ablation 스터디 추가: "기법이 아니라 조합만 봤다"는 한계를 보완
+
+원래 계획에는 없던, 완주 이후에 추가로 요청받은 확장 작업.
+
+- **동기**: 기존 11개 combo는 전부 "이미 다 조합된 최종 상태"(예:
+  `int4_nf4_doublequant_bnb`)만 측정해서, 그 combo의 정확도 하락 중 어디까지가
+  weight quantization 때문이고 어디까지가 다른 요인 때문인지 분리할 수 없었음.
+  사용자가 제안한 ablation 설계(baseline → weight quant만 → +KV cache quant →
+  +activation quant → +CPU offload, 각 축을 최소 accuracy/throughput/VRAM
+  3가지로 로깅)를 적용하기로 함.
+- **범위 축소 (사용자 결정)**: qwen2.5-32b 1개 모델로만 파일럿, AWQ/GPTQ는
+  자체 calibration 없이 커뮤니티(사실은 Qwen팀 공식) 사전 양자화 체크포인트
+  사용, accuracy 축에 perplexity(WikiText-2) 추가, CPU offload는 이번
+  phase에서 제외.
+- **"사다리"가 실제로는 그대로 안 맞음 (중요한 발견)**: 설치된 vLLM 0.25.1
+  소스를 직접 읽어서 확인한 결과 —
+  - AWQ/GPTQ는 이미 양자화된 체크포인트를 **로드**만 가능 (`quantization=
+    "awq_marlin"`/`"gptq_marlin"`), 온더플라이 양자화기는 없음. 그래서
+    Qwen팀이 공식 배포한 `Qwen/Qwen2.5-32B-Instruct-AWQ`,
+    `Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4`를 그대로 사용.
+  - KV cache fp8(`kv_cache_dtype="fp8"`)은 정말로 독립적인 축 — calibration
+    불필요, 어떤 weight quant 방식과도 결합 가능.
+  - **"activation quant"로 가장 간단한 경로인 `quantization="fp8"`은 별도의
+    완전한 weight+activation 양자화 방식이지, bnb/AWQ/GPTQ 위에 얹는 레이어가
+    아님.** 즉 "weight quant X + activation quant"라는 조합 자체가 이
+    툴체인에서는 존재하지 않음 — 사용자가 제안한 4단 사다리 그대로는 구현 불가.
+  - 그래서 실제 구현은: "weight quant 방식" 5개(bnb_int8, bnb_int4_nf4_doublequant,
+    awq, gptq, fp8_online — 마지막 게 바로 activation quant 역할을 겸함)를
+    서로 배타적인 대안으로 두고, 그 위에 `kv_cache_dtype=auto`/`fp8`을 독립
+    축으로 얹는 2차원 구조로 재구성함. `configs/ablation_matrix.yaml`,
+    `report/report.md`의 methodology에 이 재구성 이유를 명시함.
+- **구현**: `configs/ablation_matrix.yaml`(신규, `run_matrix.yaml`은 안 건드림),
+  `benchmark/engine.py`에 `kv_cache_dtype` 축 + `awq`/`gptq`/`fp8` quant_method
+  분기 추가, `benchmark/task_runners/run_perplexity.py`(신규, vLLM의
+  `prompt_logprobs`로 같은 서빙 모델에서 직접 NLL/perplexity 계산 — 별도
+  `transformers` forward pass로는 kv_cache_dtype/fp8 축 자체를 측정할 수 없어서
+  제외함), `data/prep_scripts/prepare_perplexity_wikitext2.py`(신규),
+  `aggregate/schema.py`/`aggregate_results.py`에 `weight_quant_method`/
+  `kv_cache_dtype`/`perplexity` 컬럼 추가 (기존 11개 production combo는 fallback
+  값으로 하위호환, 재실행 불필요).
+
 ## 종합
 
 원래 "동일한 메커니즘으로 4개 모델, 14개 combo를 돌린다"는 계획이, 실제로는
 "메커니즘을 통째로 교체하고, 구조적 이유로 모델 1개를 영구히 제외하고, 나머지
 3개 모델을 막고 있던 별개의 버그 3개를 고쳐서, 14개 중 11개 combo를 끝까지
 완주한다"는 결과로 바뀌었다 — 여기에 더해, 그 자체로 보고할 가치가 있는
-계획에 없던 모델 거동 발견이 하나 추가되었다.
+계획에 없던 모델 거동 발견이 하나 추가되었고, 완주 이후에는 "combo 단위 비교"의
+한계를 보완하기 위한 ablation 스터디(qwen2.5-32b 파일럿)가 별도 파이프라인으로
+추가되었다.

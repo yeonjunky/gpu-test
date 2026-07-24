@@ -134,3 +134,43 @@ python report/generate_report.py
 rsync -avz user@h100box:~/gpu/results/ ./results/
 rsync -avz user@h100box:~/gpu/report/ ./report/
 ```
+
+## Phase 6 -- ablation study pilot (optional, qwen2.5-32b only)
+
+Separate from Phases 1-5: isolates each quantization technique's individual
+contribution to accuracy/throughput/VRAM (bnb-int8, bnb-int4-nf4-doublequant,
+AWQ, GPTQ, fp8-online, each also measurable with `kv_cache_dtype=fp8`),
+instead of only measuring the pre-combined end states in `run_matrix.yaml`.
+Runs entirely through `configs/ablation_matrix.yaml` and separate
+`results_ablation/`/`report_ablation/` trees -- does not touch the production
+`results/`/`report/` from Phases 1-5. See `docs/Updates.md` for the full
+design rationale, including why the originally-proposed "weight quant +
+activation quant" 4th rung doesn't compose in this vLLM version and was
+reframed into two rows instead.
+
+```bash
+# local machine, one-time (adds to Phase 0's data prep)
+python data/prep_scripts/prepare_perplexity_wikitext2.py
+pytest tests/ -v   # re-confirms nothing regressed
+
+# remote H100 box
+python spike_tests/spike_test_build_llm_awq_gptq_fp8.py   # CRITICAL, do not skip
+
+python -m benchmark.orchestrator --config configs/ablation_matrix.yaml --results-dir results_ablation
+python aggregate/aggregate_results.py --run-matrix configs/ablation_matrix.yaml --results-dir results_ablation --out-dir results_ablation
+python report/generate_report.py --results-dir results_ablation --out-dir report_ablation
+```
+
+Recommended rollout, given GPU-hours are the binding cost on a rented box:
+1. Run just `fp16_baseline`, `bnb_int4_nf4_doublequant_kv_auto`, `awq_kv_auto`
+   first (`--only qwen2.5-32b`, then manually re-run individual `quant_level`s
+   via `run_one_combo.py` if needed) -- confirms the new perplexity/
+   `kv_cache_dtype` plumbing works and doesn't silently break a known-good bnb
+   combo, plus exercises the fully-new `quant_method="awq"` path.
+2. Inspect one combo's `scores.json` -- `perplexity` should be a sane finite
+   number (roughly single digits to ~10s for a 32B instruct model on
+   WikiText-2, not `NaN`/`inf`/`None`) before trusting the rest.
+3. Run the remaining 3 combos (`bnb_int8_kv_auto`, `gptq_kv_auto`,
+   `fp8_online_kv_auto`) to complete the 6-combo primary deliverable.
+4. Optionally, uncomment `configs/ablation_matrix.yaml`'s `kv_cache_dtype=fp8`
+   variants (up to 6 more combos) only after the first 6 look sane.

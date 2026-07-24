@@ -91,3 +91,19 @@ pytest tests/
   only cover W4A16/int8-per-channel for this model) -- confirmed working via
   `spike_tests/spike_test_gemma4_bnb.py`, which must pass before trusting the
   full 11-combo run.
+
+## Ablation study pilot (optional, separate entry point)
+
+`configs/ablation_matrix.yaml` is a second, independent matrix (qwen2.5-32b
+only) that isolates each quantization technique's individual contribution to
+accuracy/throughput/VRAM -- 5 mutually-exclusive weight-quant methods
+(bnb-int8, bnb-int4-nf4-doublequant, AWQ, GPTQ, fp8-online) at
+`kv_cache_dtype=auto`, each also optionally re-run at `kv_cache_dtype=fp8` --
+plus a WikiText-2 perplexity measurement alongside the existing Task A/B/C
+accuracy. Runs through the same `benchmark.orchestrator`/`aggregate_results`/
+`generate_report` pipeline against separate `results_ablation/`/
+`report_ablation/` trees, so it never touches the production `results/`.
+See `docs/RUNBOOK.md`'s Phase 6 and `docs/Updates.md`'s section 8 for the
+full design and why the originally-proposed 4-rung ladder (weight quant ->
++KV cache quant -> +activation quant) doesn't compose as-is in this vLLM
+version.
