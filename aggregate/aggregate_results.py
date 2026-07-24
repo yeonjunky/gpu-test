@@ -56,6 +56,12 @@ def build_rows(results_dir: Path, combos: list[tuple[str, str, str]]) -> tuple[l
 
         scores, perf = loaded["scores"], loaded["perf"]
         quant_method = perf.get("quant_method", "unknown")
+        # weight_quant_method/kv_cache_dtype are new ablation-study axes (see
+        # configs/ablation_matrix.yaml); fall back gracefully for production
+        # run_matrix.yaml combos whose perf_metrics.json predates them.
+        weight_quant_method = perf.get("weight_quant_method") or quant_method
+        kv_cache_dtype = perf.get("kv_cache_dtype", "auto")
+        perplexity_score = scores.get("perplexity", {}).get("perplexity")
 
         accs = []
         for task in TASKS:
@@ -69,6 +75,8 @@ def build_rows(results_dir: Path, combos: list[tuple[str, str, str]]) -> tuple[l
                 "hf_repo": hf_repo,
                 "quant_level": quant_level,
                 "quant_method": quant_method,
+                "weight_quant_method": weight_quant_method,
+                "kv_cache_dtype": kv_cache_dtype,
                 "task": task,
                 "accuracy_score": acc,
                 "n_samples": task_score.get("n_samples"),
@@ -85,9 +93,12 @@ def build_rows(results_dir: Path, combos: list[tuple[str, str, str]]) -> tuple[l
             "hf_repo": hf_repo,
             "quant_level": quant_level,
             "quant_method": quant_method,
+            "weight_quant_method": weight_quant_method,
+            "kv_cache_dtype": kv_cache_dtype,
             "load_time_sec": perf.get("load_time_sec"),
             "peak_vram_mb": perf.get("peak_vram_mb_nvidia_smi"),
             "avg_accuracy_score": sum(accs) / len(accs) if accs else None,
+            "perplexity": perplexity_score,
         })
 
     return task_rows, combo_rows, missing

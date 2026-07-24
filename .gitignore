@@ -6,6 +6,7 @@ venv/
 .env
 data/raw/
 results/
+results_ablation/
 report/figures/*.png
 *.egg-info/
 .pytest_cache/

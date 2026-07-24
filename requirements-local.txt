@@ -1,6 +1,7 @@
 pyyaml
 jsonschema
 pandas
+pyarrow
 matplotlib
 jinja2
 huggingface_hub

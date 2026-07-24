@@ -1,0 +1,101 @@
+# Ablation-style pilot: isolate each quantization technique's individual
+# contribution to accuracy/throughput/VRAM, instead of only measuring
+# pre-combined end states like configs/run_matrix.yaml does. Pilot scope:
+# qwen2.5-32b only. See docs/Updates.md for the full design rationale and the
+# "activation quant doesn't stack with weight quant" finding that reshaped
+# this from the originally-proposed 4-rung ladder into two rows of
+# mutually-exclusive weight-quant methods x an orthogonal kv_cache_dtype axis.
+#
+# Run via the same pipeline as run_matrix.yaml, pointed at separate
+# config/results/report trees so production results are untouched:
+#   python -m benchmark.orchestrator --config configs/ablation_matrix.yaml --results-dir results_ablation
+#   python aggregate/aggregate_results.py --run-matrix configs/ablation_matrix.yaml --results-dir results_ablation --out-dir results_ablation
+#   python report/generate_report.py --results-dir results_ablation --out-dir report_ablation
+schema_version: 1
+
+defaults:
+  tensor_parallel_size: 1
+  max_model_len: 32768
+  gpu_memory_utilization: 0.90
+  seed: 42
+  trust_remote_code: false
+  gated: false
+
+models:
+  - id: qwen2.5-32b
+    hf_repo: Qwen/Qwen2.5-32B-Instruct
+    runs:
+      # --- reference point ---
+      - quant_level: fp16_baseline
+        weight_quant_method: none
+        kv_cache_dtype: auto
+        quant_method: none
+        dtype: bfloat16
+        hf_repo_override: null
+        vllm_quantization: null
+        bnb_args: null
+
+      # --- 5 mutually-exclusive weight-quant methods, all at kv_cache_dtype=auto ---
+      - quant_level: bnb_int8_kv_auto
+        weight_quant_method: bnb_int8
+        kv_cache_dtype: auto
+        quant_method: bitsandbytes
+        dtype: float16
+        hf_repo_override: null
+        vllm_quantization: null
+        bnb_args:
+          load_in_8bit: true
+          load_in_4bit: false
+
+      - quant_level: bnb_int4_nf4_doublequant_kv_auto
+        weight_quant_method: bnb_int4_nf4_doublequant
+        kv_cache_dtype: auto
+        quant_method: bitsandbytes
+        dtype: bfloat16
+        hf_repo_override: null
+        vllm_quantization: null
+        bnb_args:
+          load_in_8bit: false
+          load_in_4bit: true
+          bnb_4bit_quant_type: nf4
+          bnb_4bit_compute_dtype: bfloat16
+          bnb_4bit_use_double_quant: true
+
+      - quant_level: awq_kv_auto
+        weight_quant_method: awq
+        kv_cache_dtype: auto
+        quant_method: awq
+        dtype: float16
+        hf_repo_override: Qwen/Qwen2.5-32B-Instruct-AWQ
+        vllm_quantization: awq_marlin
+        bnb_args: null
+
+      - quant_level: gptq_kv_auto
+        weight_quant_method: gptq
+        kv_cache_dtype: auto
+        quant_method: gptq
+        dtype: float16
+        hf_repo_override: Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4
+        vllm_quantization: gptq_marlin
+        bnb_args: null
+
+      - quant_level: fp8_online_kv_auto
+        weight_quant_method: fp8_online
+        kv_cache_dtype: auto
+        quant_method: fp8
+        dtype: bfloat16
+        hf_repo_override: null
+        vllm_quantization: fp8
+        bnb_args: null
+
+      # --- optional stretch goal: kv_cache_dtype=fp8 variants of the above 6.
+      # Uncomment and run only after the 6 combos above look sane (GPU-hours
+      # are the binding cost on a rented box) ---
+      # - quant_level: fp16_baseline_kv_fp8
+      #   weight_quant_method: none
+      #   kv_cache_dtype: fp8
+      #   quant_method: none
+      #   dtype: bfloat16
+      #   hf_repo_override: null
+      #   vllm_quantization: null
+      #   bnb_args: null

@@ -43,3 +43,13 @@ haystack:
   target_tokens_max: 30000
   reference_tokenizer: "cl100k_base"   # fixed reference for consistent token counting across models
   depths_pct: "linspace(0, 100, 50)"
+
+# Ablation-study only (configs/ablation_matrix.yaml) -- not part of the
+# production Task A/B/C matrix. Not a generation task: measures per-token NLL
+# via vLLM's prompt_logprobs over fixed WikiText-2 chunks, so most of the
+# generation-task fields (temperature, system_prompt) don't apply.
+perplexity:
+  name: "Perplexity (WikiText-2 raw, held-out test split)"
+  data_file: data/prepared/perplexity_wikitext2_50.jsonl
+  n_samples: 50
+  max_chunk_tokens: 1024

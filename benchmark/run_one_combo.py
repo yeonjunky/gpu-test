@@ -1,9 +1,12 @@
-"""Runs ONE (model, quant_level) combo from configs/run_matrix.yaml against
-all 3 tasks, then exits. Always launched as its OWN subprocess by
-benchmark/orchestrator.py (never looped in-process) so process exit
-guarantees full CUDA context teardown between combos -- important given the
-new gemma4 architecture and the large per-model memory footprints involved.
-GPU-only; not runnable on the local authoring machine.
+"""Runs ONE (model, quant_level) combo from configs/run_matrix.yaml (or
+configs/ablation_matrix.yaml) against every task registered in TASK_RUNNERS
+-- task_a/b/c plus perplexity (the latter added for the ablation study;
+harmless/additive on a production run_matrix.yaml combo too, since it's just
+one extra cheap prefill-only pass), then exits. Always launched as its OWN
+subprocess by benchmark/orchestrator.py (never looped in-process) so process
+exit guarantees full CUDA context teardown between combos -- important given
+the new gemma4 architecture and the large per-model memory footprints
+involved. GPU-only; not runnable on the local authoring machine.
 
 Usage:
     python -m benchmark.run_one_combo --model-id qwen2.5-32b --quant-level int8_bnb
@@ -19,9 +22,14 @@ import yaml
 
 from benchmark.engine import build_llm
 from benchmark.memory_monitor import MemoryMonitor
-from benchmark.task_runners import run_task_a, run_task_b, run_task_c
+from benchmark.task_runners import run_perplexity, run_task_a, run_task_b, run_task_c
 
-TASK_RUNNERS = {"task_a": run_task_a, "task_b": run_task_b, "task_c": run_task_c}
+TASK_RUNNERS = {
+    "task_a": run_task_a,
+    "task_b": run_task_b,
+    "task_c": run_task_c,
+    "perplexity": run_perplexity,
+}
 
 
 def find_entries(run_matrix: dict, model_id: str, quant_level: str) -> tuple[dict, dict]:
@@ -75,7 +83,10 @@ def main() -> None:
 
             scores_all[task_name] = scores_summary
             perf_all[task_name] = perf_summary
-            print(f"{task_name}: accuracy={scores_summary['accuracy']:.3f}")
+            if "accuracy" in scores_summary:
+                print(f"{task_name}: accuracy={scores_summary['accuracy']:.3f}")
+            elif "perplexity" in scores_summary:
+                print(f"{task_name}: perplexity={scores_summary['perplexity']}")
 
         del llm
         gc.collect()
@@ -96,6 +107,8 @@ def main() -> None:
         "hf_repo": model_entry["hf_repo"],
         "quant_level": args.quant_level,
         "quant_method": run_entry["quant_method"],
+        "weight_quant_method": run_entry.get("weight_quant_method"),
+        "kv_cache_dtype": run_entry.get("kv_cache_dtype", "auto"),
         "load_time_sec": round(load_time_sec, 2),
         "peak_vram_mb_nvidia_smi": peak_vram_mb,
         "peak_vram_mb_torch_allocator": torch_peak_mb,

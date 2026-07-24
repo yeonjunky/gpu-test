@@ -15,6 +15,18 @@ are already genuinely quantized (the officially documented "pre-quantized
 checkpoint" pattern). Note this can roughly double a model's on-disk
 footprint (full-precision source + quantized cache) -- see docs/RUNBOOK.md's
 disk-space guidance.
+
+awq/gptq/fp8 quant_methods (added for configs/ablation_matrix.yaml) need no
+pre-quantize-and-cache step at all, unlike bitsandbytes: awq_marlin/gptq_marlin
+only *load* a checkpoint whose config.json already declares quant_method
+"awq"/"gptq" (vLLM 0.25.1 has no on-the-fly AWQ/GPTQ quantizer), so these use
+an already-quantized community checkpoint via hf_repo_override; fp8 is vLLM's
+own on-the-fly dynamic W8A8 quantizer applied directly to a full-precision
+checkpoint. Important: quantization="fp8" is a *complete alternative*
+weight+activation scheme, not a layer stacked on top of bnb/awq/gptq -- there
+is no "weight-quant X + activation-quant" combo in this tooling (see
+docs/Updates.md). kv_cache_dtype, in contrast, genuinely is an independent
+axis (a separate vLLM CacheConfig) that layers on top of any of the above.
 """
 import gc
 import json
@@ -70,6 +82,7 @@ def _build_base_kwargs(model_entry: dict, run_entry: dict, defaults: dict) -> di
         "gpu_memory_utilization": model_entry.get("gpu_memory_utilization", defaults["gpu_memory_utilization"]),
         "trust_remote_code": model_entry.get("trust_remote_code", defaults.get("trust_remote_code", False)),
         "seed": defaults.get("seed", 42),
+        "kv_cache_dtype": run_entry.get("kv_cache_dtype", "auto"),
     }
     extra = model_entry.get("vllm_extra_args") or {}
     for k, v in extra.items():
@@ -81,12 +94,19 @@ def build_llm(model_entry: dict, run_entry: dict, defaults: dict, quantized_cach
     from vllm import LLM
 
     kwargs = _build_base_kwargs(model_entry, run_entry, defaults)
+    quant_method = run_entry["quant_method"]
 
-    if run_entry["quant_method"] == "bitsandbytes":
+    if quant_method == "bitsandbytes":
         kwargs["model"] = _quantize_and_cache(model_entry, run_entry, quantized_cache_dir)
-    elif run_entry["quant_method"] == "none":
-        kwargs["model"] = model_entry["hf_repo"]
+    elif quant_method == "none":
+        kwargs["model"] = run_entry.get("hf_repo_override") or model_entry["hf_repo"]
+    elif quant_method in ("awq", "gptq", "fp8"):
+        # Community pre-quantized checkpoint (awq/gptq) or the base checkpoint
+        # (fp8, vLLM quantizes online) -- no pre-quantize-and-cache step needed
+        # for any of these three, unlike bitsandbytes.
+        kwargs["model"] = run_entry.get("hf_repo_override") or model_entry["hf_repo"]
+        kwargs["quantization"] = run_entry["vllm_quantization"]
     else:
-        raise ValueError(f"Unknown quant_method: {run_entry['quant_method']}")
+        raise ValueError(f"Unknown quant_method: {quant_method}")
 
     return LLM(**kwargs)
