@@ -33,6 +33,13 @@ QUANT_ORDER = [
     "int8_bnb",
     "int4_nf4_bnb",
     "int4_nf4_doublequant_bnb",
+    # configs/ablation_matrix.yaml (qwen2.5-32b pilot) -- fp16_baseline above is
+    # shared between both matrices.
+    "bnb_int8_kv_auto",
+    "bnb_int4_nf4_doublequant_kv_auto",
+    "awq_kv_auto",
+    "gptq_kv_auto",
+    "fp8_online_kv_auto",
 ]
 
 
